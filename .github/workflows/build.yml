@@ -1,0 +1,76 @@
+name: Build and Sign
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/release.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+            SP="$KEYSTORE_PASSWORD"
+            KA="$KEY_ALIAS"
+            KP="$KEY_PASSWORD"
+          else
+            SP=motionandre
+            KA=motionandre
+            KP=motionandre
+            keytool -genkeypair -keystore "$KS" -storepass "$SP" -keypass "$KP" -alias "$KA" -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Motion Andre"
+          fi
+          {
+            echo "KEYSTORE_PATH=$KS"
+            echo "KEYSTORE_PASSWORD=$SP"
+            echo "KEY_ALIAS=$KA"
+            echo "KEY_PASSWORD=$KP"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify signature
+        run: |
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "MotionAndre-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MotionAndre-${{ github.run_number }}
+          path: MotionAndre-${{ github.run_number }}.apk
+
+      - name: Publish release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          files: MotionAndre-${{ github.run_number }}.apk
