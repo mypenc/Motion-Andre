@@ -3,10 +3,14 @@ Motion Andre
 A clean room motion graphics editor for Android, written from scratch in Kotlin and Jetpack Compose.
 
 Features
-- Rectangle, ellipse and text layers
-- Keyframe animation for position, scale, rotation and opacity
-- Easing: linear, in, out, in-out, bounce, hold
-- Timeline with scrubbing, layer trim and keyframe markers
+- New project dialog: aspect ratio, resolution, frame rate, duration, background
+- Rectangle, circle, triangle, star, hexagon, plus and text layers
+- Color and fill: none, solid, two color gradient, hex input, alpha
+- Border, blending modes and opacity
+- Move and transform: position, rotation, scale and skew with numeric fields and a drag pad
+- Keyframes and easing: linear, in, out, in-out, bounce, hold
+- Timeline with scrubbing, visibility toggles, draggable clip ends and keyframe markers
+- Layer menu: flip, fit, fill, stretch, reorder and convert to outline
 - Drag layers directly on the preview
 - Undo and redo
 - MP4 export through MediaCodec to Movies/MotionAndre

@@ -2,6 +2,7 @@ package com.mypenc.motionandre.ui
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,7 +10,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mypenc.motionandre.data.Store
 import com.mypenc.motionandre.model.Anim
+import com.mypenc.motionandre.model.Blend
 import com.mypenc.motionandre.model.Ease
+import com.mypenc.motionandre.model.Fill
 import com.mypenc.motionandre.model.Kind
 import com.mypenc.motionandre.model.Layer
 import com.mypenc.motionandre.model.Project
@@ -27,6 +30,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+enum class Mode{HOME,FILL,BORDER,BLEND,XFORM,SHAPE,ADD}
+
 class EditorVM(app:Application):AndroidViewModel(app){
     var pr by mutableStateOf(Project())
         private set
@@ -40,6 +45,9 @@ class EditorVM(app:Application):AndroidViewModel(app){
         private set
     var canRedo by mutableStateOf(false)
         private set
+    var mode by mutableStateOf(Mode.HOME)
+    var xm by mutableIntStateOf(0)
+    var dlg by mutableIntStateOf(0)
     private val us=ArrayDeque<Project>()
     private val rs=ArrayDeque<Project>()
     private var gest=false
@@ -48,25 +56,35 @@ class EditorVM(app:Application):AndroidViewModel(app){
 
     val cur:Layer? get()=pr.layers.firstOrNull{it.id==sel}
 
+    private val u:Float get()=minOf(pr.w,pr.h)/720f
+
     init{
-        runCatching{if(file.exists())pr=Store.dec(file.readText())}
-        if(pr.layers.isEmpty())demo()
+        val ok=runCatching{
+            if(file.exists()){
+                pr=Store.dec(file.readText())
+                true
+            }else false
+        }.getOrDefault(false)
+        if(!ok)dlg=1
     }
 
-    private fun demo(){
-        val c=Layer(1L,"Circle",Kind.ELLIPSE,pal[0],240f,240f)
-            .putKey(Prop.X,0L,0.25f,Ease.OUT)
-            .putKey(Prop.X,2500L,0.75f,Ease.INOUT)
-            .putKey(Prop.X,5000L,0.25f)
-            .putKey(Prop.SX,0L,0.6f,Ease.BOUNCE)
-            .putKey(Prop.SX,1500L,1.2f)
-            .putKey(Prop.SY,0L,0.6f,Ease.BOUNCE)
-            .putKey(Prop.SY,1500L,1.2f)
-        val x=Layer(2L,"Title",Kind.TEXT,pal[5],620f,110f,"Motion Andre")
-            .copy(base=mapOf(Prop.Y to 0.18f))
-            .putKey(Prop.ALPHA,0L,0f)
-            .putKey(Prop.ALPHA,800L,1f)
-        pr=Project(layers=listOf(c,x),nextId=3L)
+    fun newProject(name:String,w:Int,h:Int,fps:Int,dur:Long,bg:Int){
+        us.clear()
+        rs.clear()
+        refresh()
+        sel=null
+        playing=false
+        mode=Mode.HOME
+        t=0L
+        pr=Project(w=w,h=h,fps=fps,dur=dur,bg=bg,name=name)
+        dlg=0
+        save()
+    }
+
+    fun applySettings(name:String,fps:Int,dur:Long,bg:Int){
+        act{it.copy(name=name,fps=fps,dur=dur,bg=bg)}
+        t=t.coerceAtMost(dur)
+        dlg=0
     }
 
     private fun refresh(){
@@ -122,6 +140,16 @@ class EditorVM(app:Application):AndroidViewModel(app){
         save()
     }
 
+    private fun edit(f:(Layer)->Layer){
+        val s=sel?:return
+        live{it.upd(s,f)}
+    }
+
+    private fun editA(f:(Layer)->Layer){
+        val s=sel?:return
+        act{it.upd(s,f)}
+    }
+
     fun save(){
         val s=Store.enc(pr)
         runCatching{file.writeText(s)}
@@ -131,8 +159,6 @@ class EditorVM(app:Application):AndroidViewModel(app){
         val f=(ms*pr.fps/1000f).roundToInt()
         t=(f*1000L/pr.fps).coerceIn(0L,pr.dur)
     }
-
-    fun step(d:Int)=seek(t+d*1000L/pr.fps)
 
     fun toggle(){
         if(playing){
@@ -156,14 +182,31 @@ class EditorVM(app:Application):AndroidViewModel(app){
         act{p->
             val id=p.nextId
             val n=p.layers.count{it.kind==k}+1
-            val col=pal[id.toInt()%pal.size]
-            val l=when(k){
-                Kind.RECT->Layer(id,"Rectangle $n",k,col,320f,200f)
-                Kind.ELLIPSE->Layer(id,"Ellipse $n",k,col,240f,240f)
-                Kind.TEXT->Layer(id,"Text $n",k,pal[5],520f,110f,"Text")
+            val d=when(k){
+                Kind.RECT->320f to 200f
+                Kind.ELLIPSE->240f to 240f
+                Kind.TRIANGLE->260f to 240f
+                Kind.STAR->260f to 250f
+                Kind.HEXAGON->260f to 230f
+                Kind.PLUS->220f to 220f
+                Kind.TEXT->520f to 110f
             }
+            val nm=k.name.lowercase().replaceFirstChar{it.uppercase()}
+            val l=Layer(
+                id=id,
+                name="$nm $n",
+                kind=k,
+                color=if(k==Kind.TEXT)pal[5] else pal[id.toInt()%pal.size],
+                w=d.first*u,
+                h=d.second*u,
+                text=if(k==Kind.TEXT)"Text" else "",
+                outT=p.dur,
+                color2=pal[(id.toInt()+2)%pal.size],
+                rad=16f*u
+            )
             sel=id
-            p.copy(layers=p.layers+l.copy(outT=p.dur),nextId=id+1L)
+            mode=Mode.HOME
+            p.copy(layers=p.layers+l,nextId=id+1L)
         }
     }
 
@@ -192,57 +235,133 @@ class EditorVM(app:Application):AndroidViewModel(app){
         }
     }
 
+    fun hide(id:Long){
+        act{it.upd(id){l->l.copy(hidden=!l.hidden)}}
+    }
+
+    fun rename(v:String){
+        if(sel!=null)edit{it.copy(name=v)} else live{it.copy(name=v)}
+    }
+
     fun setP(pp:Prop,v:Float){
-        val s=sel?:return
         val tt=t
-        live{it.upd(s){l->l.setVal(pp,v,tt)}}
+        edit{l->l.setVal(pp,v,tt)}
+    }
+
+    private fun adj(pp:Prop,d:Float){
+        val tt=t
+        edit{l->l.setVal(pp,(Anim.value(l,pp,tt)+d).coerceIn(pp.min,pp.max),tt)}
     }
 
     fun nudge(dx:Float,dy:Float){
-        val s=sel?:return
         val tt=t
-        live{
-            it.upd(s){l->
-                l.setVal(Prop.X,Anim.value(l,Prop.X,tt)+dx,tt)
-                    .setVal(Prop.Y,Anim.value(l,Prop.Y,tt)+dy,tt)
-            }
+        edit{l->
+            l.setVal(Prop.X,Anim.value(l,Prop.X,tt)+dx,tt)
+                .setVal(Prop.Y,Anim.value(l,Prop.Y,tt)+dy,tt)
         }
     }
 
-    fun toggleKey(pp:Prop){
-        val s=sel?:return
+    fun pad(dx:Float,dy:Float){
+        if(cur==null)return
         val tt=t
-        act{
-            it.upd(s){l->
-                if(l.keys[pp].orEmpty().any{k->k.t==tt})l.delKey(pp,tt)
-                else l.putKey(pp,tt,Anim.value(l,pp,tt))
+        val k=pr.w/720f
+        when(xm){
+            0->nudge(dx*k/pr.w,dy*k/pr.h)
+            1->adj(Prop.ROT,dx*0.4f)
+            2->{
+                val f=1f+dx*0.004f
+                edit{a->
+                    a.setVal(Prop.SX,(Anim.value(a,Prop.SX,tt)*f).coerceIn(0f,4f),tt)
+                        .setVal(Prop.SY,(Anim.value(a,Prop.SY,tt)*f).coerceIn(0f,4f),tt)
+                }
             }
+            else->adj(Prop.SKEW,dx*0.2f)
         }
+    }
+
+    fun hasKeys(ps:List<Prop>):Boolean{
+        val l=cur?:return false
+        return ps.all{p->l.keys[p].orEmpty().any{k->k.t==t}}
+    }
+
+    fun toggleKeys(ps:List<Prop>){
+        val tt=t
+        editA{l->
+            val all=ps.all{p->l.keys[p].orEmpty().any{k->k.t==tt}}
+            ps.fold(l){a,p->if(all)a.delKey(p,tt) else a.putKey(p,tt,Anim.value(a,p,tt))}
+        }
+    }
+
+    fun easeNow():Ease?{
+        val l=cur?:return null
+        return l.keys.values.flatten().firstOrNull{it.t==t}?.ease
     }
 
     fun setEase(e:Ease){
-        val s=sel?:return
         val tt=t
-        act{
-            it.upd(s){l->
-                l.copy(keys=l.keys.mapValues{(_,ks)->ks.map{k->if(k.t==tt)k.copy(ease=e) else k}})
-            }
+        editA{l->
+            l.copy(keys=l.keys.mapValues{(_,ks)->ks.map{k->if(k.t==tt)k.copy(ease=e) else k}})
         }
     }
 
-    fun color(c:Int){
-        val s=sel?:return
-        act{it.upd(s){l->l.copy(color=c)}}
+    fun fill(f:Fill)=editA{it.copy(fill=f)}
+
+    fun col(c:Int,second:Boolean){
+        edit{if(second)it.copy(color2=c) else it.copy(color=c)}
+    }
+
+    fun stroke(w:Float?,c:Int?){
+        edit{it.copy(strokeW=w?:it.strokeW,strokeC=c?:it.strokeC)}
+    }
+
+    fun blend(b:Blend)=editA{it.copy(blend=b)}
+
+    fun size(w:Float,h:Float){
+        edit{it.copy(w=w,h=h)}
+    }
+
+    fun rad(r:Float){
+        edit{it.copy(rad=r)}
     }
 
     fun text(v:String){
-        val s=sel?:return
-        live{it.upd(s){l->l.copy(text=v)}}
+        edit{it.copy(text=v)}
     }
 
-    fun trim(a:Long,b:Long){
-        val s=sel?:return
-        live{it.upd(s){l->l.copy(inT=a,outT=b)}}
+    fun flip(h:Boolean){
+        editA{if(h)it.copy(flipH=!it.flipH) else it.copy(flipV=!it.flipV)}
+    }
+
+    fun fit(m:Int){
+        val tt=t
+        val pw=pr.w
+        val ph=pr.h
+        editA{l->
+            val sx=pw/l.w
+            val sy=ph/l.h
+            val a=when(m){
+                0->minOf(sx,sy)
+                1->maxOf(sx,sy)
+                else->sx
+            }
+            val b=if(m>1)sy else a
+            l.setVal(Prop.X,0.5f,tt).setVal(Prop.Y,0.5f,tt)
+                .setVal(Prop.SX,a,tt).setVal(Prop.SY,b,tt).setVal(Prop.ROT,0f,tt)
+        }
+    }
+
+    fun outline(){
+        val w=(6f*u).coerceAtLeast(2f)
+        editA{it.copy(fill=Fill.NONE,strokeW=w,strokeC=it.color)}
+    }
+
+    fun trimEdge(id:Long,which:Int,ms:Long){
+        live{p->
+            p.upd(id){l->
+                if(which==1)l.copy(inT=ms.coerceIn(0L,l.outT-100L))
+                else l.copy(outT=ms.coerceIn(l.inT+100L,p.dur))
+            }
+        }
     }
 
     fun grab(x:Float,y:Float):Boolean{

@@ -36,7 +36,7 @@ object Anim{
     }
 }
 
-fun Layer.vis(t:Long):Boolean=t>=inT&&t<=outT
+fun Layer.vis(t:Long):Boolean=!hidden&&t>=inT&&t<=outT
 
 fun Layer.putKey(p:Prop,t:Long,v:Float,e:Ease?=null):Layer{
     val cur=keys[p].orEmpty()
